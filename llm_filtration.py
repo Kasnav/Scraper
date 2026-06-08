@@ -13,7 +13,7 @@ from google.genai import types
 # =====================================================================
 # PART 1: LLM ANALYTICAL SCORER ENGINE (UNTOUCHED RUBRIC)
 # =====================================================================
-def evaluate_and_score_tenders(input_json_path="filtered_tenders.json", output_json_path="file.json"):
+def evaluate_and_score_tenders(input_json_path="file.json", output_json_path="file.json"):
     """
     Reads semantically filtered tenders matching the scraper layout, runs them
     through the 2-Dimension Technical Fit Rubric via Gemini 2.5, appends
