@@ -1,11 +1,18 @@
+# this code is the excel converter but now with the change that it can read both yyyy-mm-dd and dd-mm-yyyy and calculate the days remaining correctly
+# this code also has the new sectors added: the corporate and pet
+# please change any other code as this has been changed
+# i have also added a cell which has connected the llm cell so this one with the json to excel converter so it is just once cell that can do it all but i still added them separately
 import os
+import json
+import re
 import pandas as pd
+from datetime import datetime
 import requests
 from openpyxl.styles import PatternFill
-import re
-from datetime import datetime
-import json
 
+# =====================================================================
+# PART 2: LIVE NETWORK RATE FETCHER
+# =====================================================================
 def fetch_live_rates_or_die():
     url = "https://open.er-api.com/v6/latest/USD"
     response = requests.get(url, timeout=12)
@@ -18,8 +25,7 @@ def fetch_live_rates_or_die():
         raise ValueError("CRITICAL: Invalid data payload from currency server.")
 
     usd_rates = raw_data["rates"]
-
-    required_symbols = ["INR", "EUR", "GBP", "AUD", "JPY"]
+    required_symbols = ["INR", "EUR", "GBP", "AUD", "JPY", "AED", "CAD", "KRW", "SGD"]
     for symbol in required_symbols:
         if symbol not in usd_rates:
             raise ValueError(f"CRITICAL: Token '{symbol}' missing from market feed.")
@@ -32,10 +38,13 @@ def fetch_live_rates_or_die():
         "GBP": round(usd_to_inr / usd_rates["GBP"], 4),
         "AUD": round(usd_to_inr / usd_rates["AUD"], 4),
         "JPY": round(usd_to_inr / usd_rates["JPY"], 4),
+        "AED": round(usd_to_inr / usd_rates["AED"], 4),
+        "CAD": round(usd_to_inr / usd_rates["CAD"], 4),
+        "KRW": round(usd_to_inr / usd_rates["KRW"], 4),
+        "SGD": round(usd_to_inr / usd_rates["SGD"], 4),
         "INR": 1.0
     }
 
-    print("\n" + "="*60)
     print(" 🔄 LIVE PARITY RATIOS LOCKED TO 4 DECIMAL PLACES:")
     for currency, rate in live_inr_matrix.items():
         if currency != "INR":
@@ -45,22 +54,30 @@ def fetch_live_rates_or_die():
     return live_inr_matrix
 
 # =====================================================================
-# TEXT CLEANER & METADATA STRIPPER
+# PART 3: STRING UTILITIES, DATE PARSERS & CONVERSION ENGINES
 # =====================================================================
+def parse_flexible_date(date_str):
+    if not date_str or pd.isna(date_str) or str(date_str).strip().lower() in ["none", "", "n/a", "-"]:
+        return None
+
+    date_str = str(date_str).strip()
+
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    return None
+
 def clean_tender_string(value_str):
     if not value_str or pd.isna(value_str):
         return ""
     cleaned = str(value_str).upper().strip()
     cleaned = re.sub(r'(ID|REF|NO|NUMBER|VERSION)[:.\s]*\d+', '', cleaned)
     cleaned = re.sub(r'\b(19|20)\d{2}\b', '', cleaned)
-
-    # Normalizes white spaces instead of erasing them to keep "M" separate from "USD"
     cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned
 
-# =====================================================================
-# SMART PUNCTUATION & NOTATION RESOLVER
-# =====================================================================
 def extract_clean_float(cleaned_str):
     num_match = re.search(r'([\d.,]+)', cleaned_str)
     if not num_match:
@@ -89,6 +106,50 @@ def extract_clean_float(cleaned_str):
     except ValueError:
         return None
 
+def get_verbal_scale_multiplier(cleaned_str):
+    if "MILLION" in cleaned_str or "MIO" in cleaned_str or re.search(r'\bM\b', cleaned_str) or "88.5M" in cleaned_str.replace(" ", ""):
+        return 1_000_000.0
+    if "BILLION" in cleaned_str or re.search(r'\bB\b', cleaned_str):
+        return 1_000_000_000.0
+    if "LAKH" in cleaned_str or "LC" in cleaned_str:
+        return 100_000.0
+    if "CRORE" in cleaned_str or "CR" in cleaned_str:
+        return 10_000_000.0
+    if "K" in cleaned_str:
+        return 1_000.0
+    return 1.0
+
+def identify_currency_type(cleaned_str):
+    if "C$" in cleaned_str: return "CAD"
+    if "S$" in cleaned_str: return "SGD"
+    if "USD" in cleaned_str or "$" in cleaned_str: return "USD"
+    if "EUR" in cleaned_str or "€" in cleaned_str: return "EUR"
+    if "GBP" in cleaned_str or "£" in cleaned_str: return "GBP"
+    if "AUD" in cleaned_str: return "AUD"
+    if "JPY" in cleaned_str or "¥" in cleaned_str: return "JPY"
+    if "AED" in cleaned_str or "DIRHAM" in cleaned_str or "DH" in cleaned_str: return "AED"
+    if "CAD" in cleaned_str: return "CAD"
+    if "KRW" in cleaned_str or "WON" in cleaned_str or "₩" in cleaned_str: return "KRW"
+    if "SGD" in cleaned_str: return "SGD"
+    return "INR"
+
+def parse_and_convert_to_inr(value_str, live_rates):
+    if not value_str or pd.isna(value_str):
+        return "N/A"
+
+    cleaned_text = clean_tender_string(value_str)
+    base_number = extract_clean_float(cleaned_text)
+
+    if base_number == 0.0 or base_number is None:
+        return value_str
+
+    scale_factor = get_verbal_scale_multiplier(cleaned_text)
+    currency_code = identify_currency_type(cleaned_text)
+
+    true_base_value = round(base_number * scale_factor, 2)
+    final_inr = true_base_value * live_rates[currency_code]
+
+    return f"{final_inr:,.2f} INR"
 
 def calculate_score_color(score):
     try:
@@ -109,58 +170,17 @@ def calculate_score_color(score):
 
     return f"{r:02X}{g:02X}{b:02X}"
 
-
-def get_verbal_scale_multiplier(cleaned_str):
-    # Fixed lookup logic to handle both "88.5M" and standalone words smoothly
-    if "MILLION" in cleaned_str or "MIO" in cleaned_str or re.search(r'\bM\b', cleaned_str) or "88.5M" in cleaned_str.replace(" ", ""):
-        return 1_000_000.0
-    if "BILLION" in cleaned_str or re.search(r'\bB\b', cleaned_str):
-        return 1_000_000_000.0
-    if "LAKH" in cleaned_str or "LC" in cleaned_str:
-        return 100_000.0
-    if "CRORE" in cleaned_str or "CR" in cleaned_str:
-        return 10_000_000.0
-    if "K" in cleaned_str:
-        return 1_000.0
-    return 1.0
-
-
-def identify_currency_type(cleaned_str):
-    if "USD" in cleaned_str or "$" in cleaned_str:
-        return "USD"
-    if "EUR" in cleaned_str or "€" in cleaned_str:
-        return "EUR"
-    if "GBP" in cleaned_str or "£" in cleaned_str:
-        return "GBP"
-    if "AUD" in cleaned_str:
-        return "AUD"
-    if "JPY" in cleaned_str or "¥" in cleaned_str:
-        return "JPY"
-    return "INR"
-
-
-def parse_and_convert_to_inr(value_str, live_rates):
-    if not value_str or pd.isna(value_str):
-        return "N/A"
-
-    cleaned_text = clean_tender_string(value_str)
-    base_number = extract_clean_float(cleaned_text)
-
-    if base_number == 0.0 or base_number is None:
-        return value_str
-
-    scale_factor = get_verbal_scale_multiplier(cleaned_text)
-    currency_code = identify_currency_type(cleaned_text)
-
-    # FIX: Round the base value straight away to protect precision clean numbers
-    true_base_value = round(base_number * scale_factor, 2)
-    final_inr = true_base_value * live_rates[currency_code]
-
-    return f"{final_inr:,.2f} INR"
-
-
+# =====================================================================
+# PART 4: EXCEL GENERATION PIPELINE (UPDATED FOR CORPORATE AND PET)
+# =====================================================================
 def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeline.xlsx"):
     try:
+        if os.path.exists(excel_filename):
+            try:
+                os.remove(excel_filename)
+            except OSError:
+                pass
+
         with open(json_filename, "r") as f:
             data = json.load(f)
 
@@ -174,27 +194,34 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
 
         for index, tender in enumerate(data, start=1):
             primary_key = f"TND-{current_year}-{index:04d}"
-            original_val = tender.get("Budget in Local Currency Minimum", "")
 
+            original_val = tender.get("Budget in Local Currency Minimum", "")
             inr_value = parse_and_convert_to_inr(original_val, live_exchange_rates)
 
-            days_remaining = "N/A"
-            closing_date_str = tender.get("Expiry Date", "")
+            opening_date_raw = tender.get("Opening Date") if tender.get("Opening Date") else tender.get("BidOpeningDate", "")
+            closing_date_raw = tender.get("Expiry Date") if tender.get("Expiry Date") else tender.get("BidEndDate", "")
 
-            if closing_date_str:
-                try:
-                    closing_date = datetime.strptime(closing_date_str, "%Y-%m-%d")
-                    delta = closing_date - datetime.now()
-                    days_remaining = max(0, delta.days)
-                except ValueError:
-                    pass
+            parsed_open_dt = parse_flexible_date(opening_date_raw)
+            parsed_close_dt = parse_flexible_date(closing_date_raw)
+
+            opening_date_str = parsed_open_dt.strftime("%Y-%m-%d") if parsed_open_dt else str(opening_date_raw)
+            closing_date_str = parsed_close_dt.strftime("%Y-%m-%d") if parsed_close_dt else str(closing_date_raw)
+
+            days_remaining = "N/A"
+            if parsed_close_dt:
+                delta = parsed_close_dt - datetime.now()
+                days_remaining = max(0, delta.days)
 
             raw_status = "Open For Submission"
-
             if any(term in raw_status for term in ["COMING", "OPENING", "FUTURE", "PLANNED", "UPCOMING"]):
                 resolved_status = "Coming Soon"
             else:
                 resolved_status = "Open"
+
+            # Intelligently check 'Sector' and alternative data variations
+            sector_value = tender.get("Sector")
+            if not sector_value or sector_value == "None":
+                sector_value = tender.get("Health or Defence Category", "N/A")
 
             row = {
                 "Primary Key": primary_key,
@@ -207,69 +234,42 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
                 "Original Currency Maximum": original_val,
                 "INR Budget Minimum": inr_value,
                 "INR Budget Maximum": inr_value,
-                "Sector": tender.get("Sector", ""),
-                "Opening date": tender.get("BidOpeningDate", ""),
+                "Sector": sector_value,
+                "Opening date": opening_date_str,
                 "Closing date": closing_date_str,
                 "Days remaining": days_remaining,
                 "Tender Status": resolved_status,
-                "Award Date": tender.get("AwardDate", "N/A"),
-                "Country": tender.get("Country", ""),
+                "Award Date": tender.get("Award Date") if tender.get("Award Date") else tender.get("AwardDate", "N/A"),
+                "Country": tender.get("Country", "")
             }
-
             excel_rows.append(row)
 
         df = pd.DataFrame(excel_rows)
 
         columns_order = [
             "Primary Key", "Relevancy Score", "Tender Title", "Description",
-            "Organisation name", "Tender URL", "Original Currency Minimum", "Original Currency Maximum", "INR Budget Minimum",
-            "INR Budget Maximum", "Sector", "Opening date", "Closing date", "Days remaining",
-            "Tender Status", "Award Date", "Country"
+            "Organisation name", "Tender URL", "Original Currency Minimum", "Original Currency Maximum",
+            "INR Budget Minimum", "INR Budget Maximum", "Sector", "Opening date", "Closing date",
+            "Days remaining", "Tender Status", "Award Date", "Country"
         ]
-
         df = df[columns_order]
 
         green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
         yellow_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
 
-        file_exists = os.path.exists(excel_filename)
-
-        if file_exists:
-            writer = pd.ExcelWriter(
-                excel_filename,
-                engine="openpyxl",
-                mode="a",
-                if_sheet_exists="replace"
-            )
-            print(f"📄 Existing Excel file found. Updating '{excel_filename}'.")
-        else:
-            writer = pd.ExcelWriter(
-                excel_filename,
-                engine="openpyxl",
-                mode="w"
-            )
-            print(f"📄 No existing Excel file found. Creating '{excel_filename}'.")
-
-        with writer:
+        with pd.ExcelWriter(excel_filename, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name="Tenders")
             worksheet = writer.sheets["Tenders"]
 
             score_col_idx = columns_order.index("Relevancy Score") + 1
             status_col_idx = columns_order.index("Tender Status") + 1
 
-            for row_idx, row in enumerate(
-                worksheet.iter_rows(min_row=2, max_row=worksheet.max_row),
-                start=2
-            ):
+            for row_idx, row in enumerate(worksheet.iter_rows(min_row=2, max_row=worksheet.max_row), start=2):
                 score_cell = worksheet.cell(row=row_idx, column=score_col_idx)
                 status_cell = worksheet.cell(row=row_idx, column=status_col_idx)
 
                 hex_color = calculate_score_color(score_cell.value)
-                score_cell.fill = PatternFill(
-                    start_color=hex_color,
-                    end_color=hex_color,
-                    fill_type="solid"
-                )
+                score_cell.fill = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
 
                 if status_cell.value == "Open":
                     status_cell.fill = green_fill
@@ -279,19 +279,20 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
             for col in worksheet.columns:
                 max_len = 0
                 col_letter = col[0].column_letter
-
                 for cell in col:
                     if cell.value:
                         max_len = max(max_len, len(str(cell.value)))
+                worksheet.column_dimensions[col_letter].width = min(max(max_len + 4, 12), 60)
 
-                worksheet.column_dimensions[col_letter].width = min(
-                    max(max_len + 4, 12),
-                    60
-                )
-
-        print(f"✨ Success! Saved updates to '{excel_filename}'.")
+        print(f"✨ Success! Saved precise updates to '{excel_filename}'.")
 
     except Exception as e:
-        print(f"\n❌ CRITICAL PIPELINE FAILURE: {e}\n")
+        print(f"\n❌ CRITICAL EXCEL PIPELINE FAILURE: {e}\n")
         raise
 
+if __name__ == "__main__":
+    print("📊 Initializing automatic Excel Compilation Pipeline...")
+    json_to_excel(
+        json_filename="file.json",
+        excel_filename="live_tenders_pipeline.xlsx"
+    )
