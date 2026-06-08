@@ -1187,5 +1187,5 @@ evaluate_and_score_tenders(
     input_json_path="file.json", 
     output_json_path="file.json"
 )
-print("📊 Compiling Final Pipeline Workbook...")
+print("📊 Compiling Final Excel...")
 json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeline.xlsx")
