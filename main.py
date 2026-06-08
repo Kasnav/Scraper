@@ -1179,5 +1179,13 @@ for key in r.scan_iter("tender:*"):
     except:
         print("Skipping non JSON Tender")
 
+print("Running Layer 2: Semantic Embedding Filter...")
 semantic_filter(all_tenders)
-json_to_excel()
+
+print("Running Layer 3: LLM Analytical Scorer Engine...")
+evaluate_and_score_tenders(
+    input_json_path="file.json", 
+    output_json_path="file.json"
+)
+print("📊 Compiling Final Pipeline Workbook...")
+json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeline.xlsx")
