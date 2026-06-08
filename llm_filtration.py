@@ -172,6 +172,6 @@ CRITICAL OUTPUT PROTOCOL (UNCOMPROMISING CONSTRAINT)
 
 if __name__ == "__main__":
     evaluate_and_score_tenders(
-        input_json_path="filtered_tenders.json",
+        input_json_path="file.json",
         output_json_path="file.json"
     )
