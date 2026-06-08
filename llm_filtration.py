@@ -1,7 +1,5 @@
 # llm_analytical_scorer.py
 # code wont work as you must insert an API key
-# so i have changed the llm instructions so please update any other code.
-# i have also added a cell which has connected the llm cell so this one with the json to excel converter so it is just once cell that can do it all but i still added them separately
 import os
 import json
 import re
