@@ -15,6 +15,8 @@ from Scraper.datasetManager import json_to_excel
 
 from Scraper.semantic import semantic_filter
 
+from Scraper.llm_filtration import evaluate_and_score_tenders
+
 keywordList = []
 keywordIndexes = ["Health", "Defence", "Corporate", "Pets"]
 
