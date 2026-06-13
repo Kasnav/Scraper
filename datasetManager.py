@@ -63,14 +63,24 @@ def parse_flexible_date(date_str):
     date_str = str(date_str).strip()
     
     # CRITICAL FIX: Strip ISO time elements (e.g., "2026-06-25T14:30:00Z" becomes "2026-06-25")
-    date_str = date_str.split('T')[0].split(' ')[0]
+    # But leave spaces alone if they are separation marks for textual months (e.g., "25 Jun 2026")
+    if 'T' in date_str:
+        date_str = date_str.split('T')[0]
 
-    # Expanded robust format list
+    # Expanded robust format list including 3-letter months in both ascending and descending orders
     allowed_formats = (
-        "%Y-%m-%d", "%Y/%m/%d",  # Descending
-        "%d-%m-%Y", "%d/%m/%Y",  # Ascending
-        "%d-%b-%Y", "%d %b %Y",  # With short month text (e.g., 25-Jun-2026)
-        "%B %d, %Y"              # Written out (e.g., June 25, 2026)
+        # --- Pure Numeric Formats ---
+        "%Y-%m-%d", "%Y/%m/%d",  # Descending numeric (e.g., 2026-06-25)
+        "%d-%m-%Y", "%d/%m/%Y",  # Ascending numeric (e.g., 25-06-2026)
+        
+        # --- 3-Letter Month ASCENDING Formats (e.g., 25-Jun-2026, 25/Jun/2026, 25 Jun 2026) ---
+        "%d-%b-%Y", "%d/%b/%Y", "%d %b %Y",
+        
+        # --- 3-Letter Month DESCENDING Formats (e.g., 2026-Jun-25, 2026/Jun/25, 2026 Jun 25) ---
+        "%Y-%b-%d", "%Y/%b/%d", "%Y %b %d",
+        
+        # --- Full Written Month Name Formats ---
+        "%B %d, %Y", "%d %B %Y"
     )
 
     for fmt in allowed_formats:
@@ -204,21 +214,17 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
         for index, tender in enumerate(data, start=1):
             primary_key = f"TND-{current_year}-{index:04d}"
 
-            # Step 1: Pull BOTH minimum and maximum strings separately
             min_val_str = tender.get("Budget in Local Currency Minimum", "")
             max_val_str = tender.get("Budget in Local Currency Maximum", "")
             
-            # Step 2: Grab the exact currency from the JSON explicit field first
             explicit_currency = tender.get("Budget Currency", "").strip().upper()
             
             if explicit_currency and explicit_currency in live_exchange_rates:
                 currency_code = explicit_currency
             else:
-                # Fallback: if the JSON left it blank, try to find a symbol like '$' in the string
                 cleaned_budget_str = clean_tender_string(str(min_val_str))
                 currency_code = identify_currency_type(cleaned_budget_str)
             
-            # Step 3: Convert both min and max using that locked currency code
             inr_min_value = parse_and_convert_to_inr(min_val_str, currency_code, live_exchange_rates)
             inr_max_value = parse_and_convert_to_inr(max_val_str, currency_code, live_exchange_rates)
 
@@ -253,11 +259,11 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
                 "Description": tender.get("Tender Description", ""),
                 "Organisation name": tender.get("Organisation Name", ""),
                 "Tender URL": tender.get("Link to the Tender", ""),
-                "Original Currency": currency_code,  # Name changed and correctly sourced!
+                "Original Currency": currency_code,
                 "Original Currency Minimum": min_val_str,
-                "Original Currency Maximum": max_val_str, # Max values mapped correctly!
+                "Original Currency Maximum": max_val_str,
                 "INR Budget Minimum": inr_min_value,
-                "INR Budget Maximum": inr_max_value,      # Max converted correctly!
+                "INR Budget Maximum": inr_max_value,
                 "Sector": sector_value,
                 "Opening date": opening_date_str,
                 "Closing date": closing_date_str,
