@@ -62,7 +62,14 @@ def parse_flexible_date(date_str):
 
     date_str = str(date_str).strip()
 
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+    # Strictly Ascending (DD-MM-YYYY) and Descending (YYYY-MM-DD)
+    # NO American Month/Day/Year formats included here.
+    allowed_formats = (
+        "%Y-%m-%d", "%Y/%m/%d",  # Descending
+        "%d-%m-%Y", "%d/%m/%Y"   # Ascending
+    )
+
+    for fmt in allowed_formats:
         try:
             return datetime.strptime(date_str, fmt)
         except ValueError:
@@ -209,7 +216,9 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
 
             days_remaining = "N/A"
             if parsed_close_dt:
-                delta = parsed_close_dt - datetime.now()
+                # Adding .date() strips the time, fixing the 1-day drift.
+                # Python's built-in math automatically accounts for leap years here!
+                delta = parsed_close_dt.date() - datetime.now().date()
                 days_remaining = max(0, delta.days)
 
             raw_status = "Open For Submission"
