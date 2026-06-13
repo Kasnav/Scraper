@@ -61,12 +61,16 @@ def parse_flexible_date(date_str):
         return None
 
     date_str = str(date_str).strip()
+    
+    # CRITICAL FIX: Strip ISO time elements (e.g., "2026-06-25T14:30:00Z" becomes "2026-06-25")
+    date_str = date_str.split('T')[0].split(' ')[0]
 
-    # Strictly Ascending (DD-MM-YYYY) and Descending (YYYY-MM-DD)
-    # NO American Month/Day/Year formats included here.
+    # Expanded robust format list
     allowed_formats = (
         "%Y-%m-%d", "%Y/%m/%d",  # Descending
-        "%d-%m-%Y", "%d/%m/%Y"   # Ascending
+        "%d-%m-%Y", "%d/%m/%Y",  # Ascending
+        "%d-%b-%Y", "%d %b %Y",  # With short month text (e.g., 25-Jun-2026)
+        "%B %d, %Y"              # Written out (e.g., June 25, 2026)
     )
 
     for fmt in allowed_formats:
@@ -114,7 +118,7 @@ def extract_clean_float(cleaned_str):
         return None
 
 def get_verbal_scale_multiplier(cleaned_str):
-    if "MILLION" in cleaned_str or "MIO" in cleaned_str or re.search(r'\bM\b', cleaned_str) or "88.5M" in cleaned_str.replace(" ", ""):
+    if re.search(r'\d\s*M\b', cleaned_str) or "MILLION" in cleaned_str or "MIO" in cleaned_str or "88.5M" in cleaned_str.replace(" ", ""):
         return 1_000_000.0
     if "BILLION" in cleaned_str or re.search(r'\bB\b', cleaned_str):
         return 1_000_000_000.0
@@ -140,7 +144,7 @@ def identify_currency_type(cleaned_str):
     if "SGD" in cleaned_str: return "SGD"
     return "INR"
 
-def parse_and_convert_to_inr(value_str, live_rates):
+def parse_and_convert_to_inr(value_str, assigned_currency_code, live_rates):
     if not value_str or pd.isna(value_str):
         return "N/A"
 
@@ -151,10 +155,8 @@ def parse_and_convert_to_inr(value_str, live_rates):
         return value_str
 
     scale_factor = get_verbal_scale_multiplier(cleaned_text)
-    currency_code = identify_currency_type(cleaned_text)
-
     true_base_value = round(base_number * scale_factor, 2)
-    final_inr = true_base_value * live_rates[currency_code]
+    final_inr = true_base_value * live_rates.get(assigned_currency_code, 1.0)
 
     return f"{final_inr:,.2f} INR"
 
@@ -178,7 +180,7 @@ def calculate_score_color(score):
     return f"{r:02X}{g:02X}{b:02X}"
 
 # =====================================================================
-# PART 4: EXCEL GENERATION PIPELINE (UPDATED FOR CORPORATE AND PET)
+# PART 4: EXCEL GENERATION PIPELINE 
 # =====================================================================
 def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeline.xlsx"):
     try:
@@ -202,8 +204,23 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
         for index, tender in enumerate(data, start=1):
             primary_key = f"TND-{current_year}-{index:04d}"
 
-            original_val = tender.get("Budget in Local Currency Minimum", "")
-            inr_value = parse_and_convert_to_inr(original_val, live_exchange_rates)
+            # Step 1: Pull BOTH minimum and maximum strings separately
+            min_val_str = tender.get("Budget in Local Currency Minimum", "")
+            max_val_str = tender.get("Budget in Local Currency Maximum", "")
+            
+            # Step 2: Grab the exact currency from the JSON explicit field first
+            explicit_currency = tender.get("Budget Currency", "").strip().upper()
+            
+            if explicit_currency and explicit_currency in live_exchange_rates:
+                currency_code = explicit_currency
+            else:
+                # Fallback: if the JSON left it blank, try to find a symbol like '$' in the string
+                cleaned_budget_str = clean_tender_string(str(min_val_str))
+                currency_code = identify_currency_type(cleaned_budget_str)
+            
+            # Step 3: Convert both min and max using that locked currency code
+            inr_min_value = parse_and_convert_to_inr(min_val_str, currency_code, live_exchange_rates)
+            inr_max_value = parse_and_convert_to_inr(max_val_str, currency_code, live_exchange_rates)
 
             opening_date_raw = tender.get("Opening Date") if tender.get("Opening Date") else tender.get("BidOpeningDate", "")
             closing_date_raw = tender.get("Expiry Date") if tender.get("Expiry Date") else tender.get("BidEndDate", "")
@@ -216,8 +233,6 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
 
             days_remaining = "N/A"
             if parsed_close_dt:
-                # Adding .date() strips the time, fixing the 1-day drift.
-                # Python's built-in math automatically accounts for leap years here!
                 delta = parsed_close_dt.date() - datetime.now().date()
                 days_remaining = max(0, delta.days)
 
@@ -227,7 +242,6 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
             else:
                 resolved_status = "Open"
 
-            # Intelligently check 'Sector' and alternative data variations
             sector_value = tender.get("Sector")
             if not sector_value or sector_value == "None":
                 sector_value = tender.get("Health or Defence Category", "N/A")
@@ -239,10 +253,11 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
                 "Description": tender.get("Tender Description", ""),
                 "Organisation name": tender.get("Organisation Name", ""),
                 "Tender URL": tender.get("Link to the Tender", ""),
-                "Original Currency Minimum": original_val,
-                "Original Currency Maximum": original_val,
-                "INR Budget Minimum": inr_value,
-                "INR Budget Maximum": inr_value,
+                "Original Currency": currency_code,  # Name changed and correctly sourced!
+                "Original Currency Minimum": min_val_str,
+                "Original Currency Maximum": max_val_str, # Max values mapped correctly!
+                "INR Budget Minimum": inr_min_value,
+                "INR Budget Maximum": inr_max_value,      # Max converted correctly!
                 "Sector": sector_value,
                 "Opening date": opening_date_str,
                 "Closing date": closing_date_str,
@@ -257,7 +272,7 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
 
         columns_order = [
             "Primary Key", "Relevancy Score", "Tender Title", "Description",
-            "Organisation name", "Tender URL", "Original Currency Minimum", "Original Currency Maximum",
+            "Organisation name", "Tender URL", "Original Currency", "Original Currency Minimum", "Original Currency Maximum",
             "INR Budget Minimum", "INR Budget Maximum", "Sector", "Opening date", "Closing date",
             "Days remaining", "Tender Status", "Award Date", "Country"
         ]
