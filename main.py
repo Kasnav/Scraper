@@ -20,19 +20,25 @@ from Scraper.llm_filtration import evaluate_and_score_tenders
 keywordList = []
 keywordIndexes = ["Health", "Defence", "Corporate", "Pets"]
 
-with open('Health.json', 'r') as file:
+# with open('Health.json', 'r') as file:
+import os
+
+BASE_DIR = os.path.dirname(__file__)
+
+with open(os.path.join(BASE_DIR, 'Health.json'), 'r') as file:
     HealthWords = json.load(file)
     keywordList.append(HealthWords)
 
-with open('Defence.json', 'r') as file:
+# with open('Defence.json', 'r') as file:
+with open(os.path.join(BASE_DIR, 'Defence.json'), 'r') as file:
     DefenceWords = json.load(file)
     keywordList.append(DefenceWords)
 
-with open("Corporate.json", "r") as file:
+with open(os.path.join(BASE_DIR, 'Corporate.json'), 'r') as file:
     CorporateWords = json.load(file)
     keywordList.append(CorporateWords)
 
-with open("Pets.json", "r") as file:
+with open(os.path.join(BASE_DIR, 'Pets.json'), 'r') as file:
     PetsWords = json.load(file)
     keywordList.append(PetsWords)
 
@@ -165,7 +171,8 @@ def get_iframe_query_string(returnContentDocument, adapter):
             else:
                 return selectorStr
         else:
-            selectorStr += f"?.querySelector('{adapter["iframe"]}')"
+            # selectorStr += f"?.querySelector('{adapter["iframe"]}')"
+            selectorStr += f"?.querySelector('{adapter['iframe']}')"
             if returnContentDocument:
                 return f"{selectorStr}?.contentDocument"
             else:
@@ -239,7 +246,8 @@ def getElementQueryStringForListItems(adapter):
                 selectorStr += f"?.querySelectorAll('{level}')"
         return selectorStr
     else:
-        selectorStr += f"?.querySelectorAll('{adapter["IdentifierForTenderList"]}')"
+        # selectorStr += f"?.querySelectorAll('{adapter["IdentifierForTenderList"]}')"
+        selectorStr += f"?.querySelectorAll('{adapter['IdentifierForTenderList']}')"
         return selectorStr
 
 
@@ -1157,8 +1165,13 @@ for adapter in adapters:
     threads.append(thread)
     thread.start()
 
+# for thread in threads:
+#     thread.join()
 for thread in threads:
-    thread.join()
+    thread.join(timeout=180)
+
+print("Finished waiting for scraper threads")
+print("Collecting Redis tenders...")
 
 all_tenders = []
 for key in r.scan_iter("tender:*"):
@@ -1178,6 +1191,7 @@ for key in r.scan_iter("tender:*"):
         all_tenders.append(tender)
     except:
         print("Skipping non JSON Tender")
+
 
 print("Running Layer 2: Semantic Embedding Filter...")
 semantic_filter(all_tenders)

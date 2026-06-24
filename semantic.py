@@ -5,7 +5,9 @@ import json, pandas as pd
 from Scraper.target_profiles import HealthTargetProfiles, DefenceTargetProfiles, CorporateTargetProfiles, PetsTargetProfiles
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
-print("✓ Model loaded. Embedding dim:", model.get_embedding_dimension())
+print("✓ Model loaded")
+print("Embedding dim:", model.get_sentence_embedding_dimension())
+
 health_emb  = model.encode(HealthTargetProfiles,  normalize_embeddings=True)
 defence_emb = model.encode(DefenceTargetProfiles, normalize_embeddings=True)
 corporate_emb = model.encode(CorporateTargetProfiles, normalize_embeddings=True)
@@ -59,17 +61,22 @@ def semantic_filter(tenders, threshold=0.35):
         'sector'
     ]])
 
+    # filtered = [
+    #     {**tender, **result}
+    #     for tender, result in zip(tenders, results)
+    #     if any([
+    #         result["health_pass"],
+    #         result["defence_pass"],
+    #         result["corporate_pass"],
+    #         result["pets_pass"],
+    #     ])
+    # ]
     filtered = [
         {**tender, **result}
         for tender, result in zip(tenders, results)
-        if any([
-            result["health_pass"],
-            result["defence_pass"],
-            result["corporate_pass"],
-            result["pets_pass"],
-        ])
     ]
-
+    print(f"Input tenders: {len(tenders)}")
+    print(f"Filtered tenders: {len(filtered)}")
     with open("file.json", "w") as f:
         json.dump(filtered, f, indent=2)
 

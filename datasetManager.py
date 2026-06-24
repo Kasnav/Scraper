@@ -217,7 +217,8 @@ def json_to_excel(json_filename="file.json", excel_filename="live_tenders_pipeli
             min_val_str = tender.get("Budget in Local Currency Minimum", "")
             max_val_str = tender.get("Budget in Local Currency Maximum", "")
             
-            explicit_currency = tender.get("Budget Currency", "").strip().upper()
+            # explicit_currency = tender.get("Budget Currency", "").strip().upper()
+            explicit_currency = str(tender.get("Budget Currency") or "").strip().upper()
             
             if explicit_currency and explicit_currency in live_exchange_rates:
                 currency_code = explicit_currency
